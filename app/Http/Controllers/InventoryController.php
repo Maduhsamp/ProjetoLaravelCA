@@ -4,8 +4,10 @@ namespace App\Http\Controllers;
 
 use App\Models\Explorer;
 use App\Models\Inventory;
+use App\Models\Items;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use PHPUnit\Framework\Constraint\IsEmpty;
 
 class InventoryController extends Controller
 {
@@ -30,7 +32,7 @@ class InventoryController extends Controller
 
     public function trocarItens(Request $request)
     {
-        $request->validate([
+        $data = $request->validate([
             'explorador_origem_troca_id' => 'required|exists:explorers,id',
             'explorador_destino_troca_id' => 'required|exists:explorers,id',
             'item_origem' => 'required',
@@ -39,34 +41,24 @@ class InventoryController extends Controller
 
         DB::beginTransaction();
 
-        try {
+        $itens_origem = $data['item_origem'];
+        $itens_destino = $data['item_destino'];
 
-            $exploradorOrigemTroca = Explorer::findOrFail($request->explorador_origem_troca_id);
-            $exploradorDestinoTroca = Explorer::findOrFail($request->explorador_destino_troca_id);
+        $explorador_origem = Inventory::find($data['explorador_origem_troca_id']);
+        $explorador_destino = Inventory::find($data['explorador_destino_troca_id']);
 
-            if ($this->verificarTrocaJusta($exploradorOrigemTroca, $exploradorDestinoTroca, $request->item_origem, $request->item_destino)) {
+        $valor_origem = Items::whereIn('id', $itens_origem)->sum('valor');
+        $valor_destino = Items::whereIn('id', $itens_destino)->sum('valor');
 
-                $this->efetuarTroca($exploradorOrigemTroca, $exploradorDestinoTroca, $request->item_origem, $request->item_destino);
-
-                DB::commit();
-
-                return response()->json(['mensagem' => 'Troca de itens realizada com sucesso'], 200);
-
-            } else {
-
-                DB::rollBack();
-
-                return response()->json(['mensagem' => 'A troca de itens não é justa'], 400);
-            }
-        } catch (\Exception $e) {
-
+        if($valor_origem !== $valor_destino) {
             DB::rollBack();
-            return response()->json(['mensagem' => 'Erro ao processar a troca de itens: ' . $e->getMessage()], 500);
+            return response()->json(['Error' => 'Os valores dos itens não são equivalentes!'], 400);
         }
-    }
 
-    private function verificarTrocaJusta($itemOrigem, $itemDestino)
-    {
-        return $itemOrigem->valor == $itemDestino->valor;
+        Inventory::whereIn('item_id', $itens_origem)->update(['explorer_id' => $explorador_destino->id]);
+        Inventory::whereIn('item_id', $itens_destino)->update(['explorer_id' => $explorador_origem->id]);
+
+        DB::commit();
+        return response()->json(['Troca de itens realizada com sucesso!'], 200);
     }
 }
